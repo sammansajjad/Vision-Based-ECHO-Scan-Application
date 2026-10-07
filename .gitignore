@@ -1,2 +1,6 @@
 data/raw/
 data/processed/
+venv/
+.vscode/
+__pycache__/
+*.pyc
