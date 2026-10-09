@@ -116,3 +116,33 @@ These observations must not be generalized to the entire CAMUS dataset without f
 
 Completed.
 
+## EXP-002 - CAMUS Expert Image-Quality Label Survey
+
+### Purpose
+
+Find out which expert image-quality labels exist in CAMUS and how common they are, before designing any automatic quality check.
+
+### Method
+
+`scripts/survey_camus_quality.py` reads `ImageQuality` from `Info_2CH.cfg` and `Info_4CH.cfg` for every patient folder, using `read_camus_image_quality`. No images were read and no raw data was modified.
+
+### Observed Evidence
+
+- 500 patient folders were found; there were 0 read errors.
+- 4CH: Good 288 (57.6%), Medium 165 (33.0%), Poor 47 (9.4%).
+- 2CH: Good 217 (43.4%), Medium 214 (42.8%), Poor 69 (13.8%).
+
+### Interpretation
+
+CAMUS provides a three-level expert quality label per patient and view. Poor images are a small minority in 4CH, so any later comparison must report group sizes and must not rely on overall accuracy alone.
+
+### Limitations
+
+- The label is expert-assigned and its exact criteria are not documented in our files.
+- It is not yet known whether any image measurement (e.g. sharpness or contrast) separates Good from Poor.
+- This survey says nothing about clinical validity.
+
+### Status
+
+Completed.
+
