@@ -172,12 +172,46 @@ The following is a design expectation. It has not been validated, because only E
 
 The current scope implements ECHO/A4C only. No other modality is implemented or tested.
 
-### Open Questions
+## 11. Design Decisions and Open Questions
 
-- Q1: Who implements and maintains the CAMUS adapter (the code that converts CAMUS files into ImageInput)? Status: to be agreed with teammate.
-- Q2: How should ED/ES frame labels be represented, if at all? Options: an optional field in ImageInput, or handled outside the CV subsystem. Status: undecided.
-- Q3: If preprocessing changes image size, how are masks and measurements mapped back to the original image geometry? Status: undecided; to be investigated experimentally.
-- Q4: What defines an "unusable" image for CAMUS A4C (which measurable criteria and thresholds)? Status: undecided; requires inspection of CAMUS image quality labels and experiments. Do not assume thresholds.
-- Q5: What is the LV target for the binary mask: LV cavity only, or LV cavity plus myocardium? Status: undecided; to be settled after further CAMUS inspection and baseline experiments.
-- Q6: Which features will be extracted, and is spatial calibration metadata available and usable for physical units? Status: undecided; not yet inspected. Do not assume.
-- Q7: How is an implausible (not only empty) mask detected, for example a very small or fragmented mask? Status: undecided; to be investigated experimentally. Do not assume thresholds.
+This section records the current design decisions and unresolved questions for the CV pipeline. Decisions may be revised when further dataset inspection or experimental evidence justifies a change.
+
+### 11.1 Agreed Design Decisions
+
+**D1. CAMUS Adapter Ownership**
+
+Samman Sajjad will implement and maintain the CAMUS adapter, with Javeria Sehzad reviewing the implementation. The adapter will convert CAMUS-specific files and metadata into the generic ImageInput representation. Dataset-specific loading and file-format handling will remain outside the core CV subsystem.
+
+**D2. ED/ES Frame Labels**
+
+End-diastole (ED) and end-systole (ES) labels will initially be handled outside ImageInput. This decision may be revisited if the CV subsystem requires cardiac-phase information for a specific operation.
+
+**D3. Image Geometry and Preprocessing**
+
+The initial pipeline will preserve the original image geometry. If resizing or other spatial transformations are introduced later, the transformations must be tracked so that masks and measurements can be mapped correctly to the original image geometry. Any such changes will be investigated experimentally.
+
+**D4. Initial LV Segmentation Target**
+
+The initial segmentation experiment will target the left ventricle cavity only, using CAMUS ground-truth label 1. The binary target mask will use 0 for background and 1 for the LV cavity. The label mapping will be verified against real CAMUS masks before the baseline segmentation experiment. Including the myocardium may be considered in a later experiment.
+
+### 11.2 Open Questions Requiring Investigation
+
+**Q1. Image Usability Criteria**
+
+What measurable criteria should determine whether a CAMUS A4C image is unusable for segmentation? Candidate criteria and thresholds must be investigated experimentally. No thresholds will be assumed without supporting evidence.
+
+**Q2. Feature Extraction and Spatial Calibration**
+
+Which image-derived features should be extracted from the LV cavity mask? Is the available CAMUS spatial calibration metadata accessible, correctly interpreted, and suitable for converting pixel measurements into physical units? These questions must be investigated before physical measurements are reported.
+
+**Q3. Implausible Segmentation Detection**
+
+How should the pipeline detect implausible segmentation masks beyond completely empty masks, such as unusually small or fragmented masks? Suitable criteria and thresholds must be established through experiments rather than assumed in advance.
+
+### 11.3 Experimental Validation Requirements
+
+Before implementing the baseline segmentation model, the CAMUS label mapping and initial LV cavity target will be checked against real ground-truth masks. The dataset will then be divided into training, validation, and test sets at the patient level to prevent frames from the same patient appearing in multiple splits.
+
+The initial segmentation model will establish a baseline against which subsequent changes, including optional post-processing or alternative target definitions, can be evaluated using consistent data splits and evaluation metrics.
+
+All experimental findings, implementation changes, and revisions to these decisions will be documented in the experiment log.
