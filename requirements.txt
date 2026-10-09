@@ -22,3 +22,12 @@ seaborn
 
 joblib
 PyYAML
+
+numpy
+nibabel
+pandas
+opencv-python
+matplotlib
+scikit-image
+scikit-learn
+scipy
