@@ -146,3 +146,36 @@ CAMUS provides a three-level expert quality label per patient and view. Poor ima
 
 Completed.
 
+## EXP-003 - Global Sharpness (Laplacian Variance) vs Expert Quality Label
+
+### Purpose
+
+Test whether a simple whole-image sharpness measure separates CAMUS Good, Medium and Poor images.
+
+### Method
+
+`scripts/exp003_sharpness_by_quality.py` computed `laplacian_variance` (`src/cv_pipeline/quality_metrics.py`) on the unmodified ED frame of every 4CH patient, in two variants: raw pixel values and per-image min-max scaling (scaling done inside the experiment only). Groups were compared by median, IQR and AUC. Per-patient values were saved to `data/processed/exp003_sharpness_4ch_ed.csv` (git-ignored).
+
+### Observed Evidence
+
+- 500 of 500 patients processed, 0 errors. Pixel minimum was 0 everywhere; pixel maximum ranged 204 to 255.
+- Raw variant, median: Good 315.6 (n=288), Medium 301.0 (n=165), Poor 295.7 (n=47).
+- Raw AUC: Good>Poor 0.552, Good>Medium 0.532, Medium>Poor 0.522.
+- Min-max variant AUC: Good>Poor 0.555, Good>Medium 0.525, Medium>Poor 0.535.
+- Group ranges overlap almost completely.
+
+### Interpretation
+
+Global Laplacian variance is only slightly better than chance at separating the expert quality groups. No threshold is justified, and none was added to the pipeline.
+
+### Limitations
+
+- Only 4CH ED frames and one metric were tested.
+- The measure includes the area outside the ultrasound sector and speckle noise.
+- No confidence intervals were computed; the Poor group is small (n=47).
+- The criteria behind the expert label are not known.
+
+### Status
+
+Completed. Negative result.
+
