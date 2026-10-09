@@ -36,7 +36,7 @@ Build the computer-vision foundation before any model training: data loading, pr
 
 \- Decision record (docs/decision\_record\_week2.md).
 
-\- 27 automated tests passed in one run; one real-data test (3 patients, ED and ES) passed in a separate run.
+\- - 28 automated tests passed in one run (27 synthetic-data tests and 1 real-data test covering 3 patients, ED and ES).
 
 \- Work is committed locally in 6 commits.
 
