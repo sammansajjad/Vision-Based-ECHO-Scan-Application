@@ -499,3 +499,199 @@ No segmentation accuracy, diagnostic performance or clinical validity is claimed
 ### Status
 
 Planned. No full training or evaluation run has been performed. The only trained checkpoint is the one-epoch smoke test in EXP-006.
+## EXP-009 - Probability Threshold Sensitivity Analysis
+
+### Purpose
+
+Investigate how the probability threshold used to convert U-Net output probabilities into binary LV cavity segmentation masks affects validation performance.
+
+The experiment aimed to determine whether the existing global threshold of 0.50 was suitable or whether an alternative threshold could improve segmentation results.
+
+### Method
+
+`scripts/evaluate_threshold_sensitivity.py` evaluated the existing U-Net checkpoint on the official CAMUS 4CH validation split.
+
+The experiment used 50 validation patients and 100 frames (50 ED and 50 ES), with the existing preprocessing pipeline.
+
+The model's sigmoid output probabilities were converted into binary masks using five thresholds:
+
+- 0.30
+- 0.40
+- 0.50
+- 0.60
+- 0.70
+
+For each threshold, Dice and IoU scores were calculated by comparing the predicted LV cavity mask against the ground-truth mask.
+
+The experiment also examined ED and ES phase-specific results to observe whether threshold sensitivity differed between the two phases.
+
+A paired threshold comparison was conducted in a separate script, `scripts/compare_thresholds_paired.py`, to examine whether changing the threshold improved or worsened individual validation frames compared with the baseline threshold of 0.50.
+
+No post-processing was applied when comparing the raw thresholded predictions.
+
+### Observed Evidence
+
+**Overall validation results:**
+
+| Probability threshold | Mean Dice | Mean IoU |
+|---|---:|---:|
+| 0.30 | 0.8207 | 0.7046 |
+| 0.40 | 0.8639 | 0.7658 |
+| 0.50 | 0.8718 | 0.7775 |
+| 0.60 | 0.8676 | 0.7711 |
+| 0.70 | 0.8516 | 0.7476 |
+
+The threshold of 0.50 achieved the highest overall mean Dice and IoU among the five evaluated thresholds.
+
+**Phase-specific observations:**
+
+- ED and ES showed different threshold-response patterns.
+- Their phase-specific mean results did not provide sufficient justification for introducing separate thresholds.
+- The global threshold of 0.50 remained the best overall choice for the evaluated validation set.
+
+**Paired threshold comparison:**
+
+- Alternative thresholds were compared against the baseline threshold of 0.50 on individual frames.
+- The paired comparison showed that alternative thresholds often worsened more frames than they improved.
+- Some individual cases benefited from a lower threshold, but these improvements did not translate into better overall validation performance.
+
+**Difficult-case observation:**
+
+- patient0291 ES had a raw Dice score of approximately 0.675 at threshold 0.50.
+- Lowering the threshold to 0.30 improved this particular case.
+- However, this case-specific improvement did not justify changing the global threshold.
+- The largest-connected-component post-processing operation had no effect on this difficult case.
+
+### Interpretation
+
+The probability threshold has a noticeable effect on LV cavity segmentation performance.
+
+Among the evaluated thresholds, 0.50 achieved the highest overall validation mean Dice of approximately 0.8718 and mean IoU of approximately 0.7775.
+
+Although lower thresholds improved certain individual cases, they also reduced performance across other frames. The paired comparison did not support replacing the global threshold with an alternative value.
+
+ED and ES showed different threshold-response patterns, but the available results did not establish a reliable reason to introduce phase-specific thresholds.
+
+Therefore, the global probability threshold of 0.50 was retained as the baseline for subsequent experiments, including EXP-010.
+
+### Limitations
+
+- Evaluation covered only the 50-patient validation split and 4CH view.
+- The existing checkpoint represents partial training, not demonstrated convergence.
+- Only five probability thresholds were evaluated.
+- No independent test-set evaluation was performed.
+- Threshold performance may differ with a fully trained model or a different dataset.
+- No confidence intervals or inferential statistical tests were calculated.
+- Individual improvements do not establish that a threshold generalizes to unseen patients.
+- Dice and IoU overlap metrics do not establish anatomical correctness, diagnostic performance, or clinical validity.
+
+### Status
+
+Completed: probability threshold sensitivity evaluation, ED/ES threshold observations, paired threshold comparison, and baseline threshold selection.
+
+The global probability threshold of 0.50 was retained for subsequent validation experiments. No phase-specific threshold or alternative global threshold was adopted.
+
+## EXP-010 - Patient-Level ED/ES Segmentation Performance Analysis
+
+### Purpose
+
+Investigate patient-level variation in LV cavity segmentation performance and compare Dice scores between ED and ES phases.
+
+### Method
+
+`scripts/analyze_patient_performance.py` evaluated the existing U-Net checkpoint on the official CAMUS 4CH validation split.
+
+The experiment used 50 patients and 100 frames (50 ED and 50 ES), with the existing preprocessing pipeline and a global probability threshold of 0.50.
+
+Predictions were evaluated without post-processing. ED and ES results were paired using patient ID and phase labels, not dataset indices.
+
+For each patient, the following were calculated:
+
+- ED Dice.
+- ES Dice.
+- Patient mean Dice: `(ED + ES) / 2`.
+- ED–ES difference: `ED Dice - ES Dice`.
+
+The script checked the expected patient and frame counts, duplicate patient-phase pairs, and missing phases before calculating statistics.
+
+Patient-level results were exported to `outputs/evaluations/exp010_patient_performance.csv`.
+
+### Observed Evidence
+
+- Validation patients: 50.
+- Evaluated frames: 100.
+- ED frames: 50.
+- ES frames: 50.
+- Unique patients: 50.
+- Duplicate patient-phase pairs: 0.
+- Missing phases: 0.
+- Dataset and pairing integrity checks: PASS.
+
+**Phase-level mean Dice:**
+
+- ED: 0.890374.
+- ES: 0.853143.
+
+**Patient-level mean Dice statistics:**
+
+- Mean: 0.871759.
+- Median: 0.882385.
+- Population standard deviation: 0.046743.
+- Minimum: 0.749900.
+- Maximum: 0.934819.
+
+**ED–ES paired differences:**
+
+- Mean difference: +0.037231.
+- Median difference: +0.030481.
+- ED higher: 35 patients.
+- ES higher: 15 patients.
+- Exact ties: 0.
+
+**Five lowest patient-level mean Dice:**
+
+- patient0284: 0.7499.
+- patient0291: 0.7631.
+- patient0314: 0.7644.
+- patient0232: 0.7806.
+- patient0268: 0.8013.
+
+**Five highest patient-level mean Dice:**
+
+- patient0279: 0.9348.
+- patient0265: 0.9330.
+- patient0303: 0.9312.
+- patient0271: 0.9288.
+- patient0256: 0.9283.
+
+The exported CSV contained 50 rows, 50 unique patient IDs, and the five expected columns.
+
+### Interpretation
+
+The mean patient-level Dice was 0.871759.
+
+ED achieved a higher mean Dice than ES, with an observed mean difference of 0.037231. ED Dice was higher for 35 of the 50 patients.
+
+Performance varied across patients. patient0291 and patient0314 showed particularly weak ES segmentation, while patient0284 had relatively low performance in both phases.
+
+The mean patient-level Dice equals the overall mean of the 100 frame-level Dice values because each patient contributes exactly one ED and one ES frame.
+
+These findings are descriptive and do not establish statistical significance or explain the causes of performance variation.
+
+The global threshold of 0.50 from EXP-009 was retained. No phase-specific threshold was introduced.
+
+### Limitations
+
+- Evaluation covered only the 50-patient validation split and 4CH view.
+- The existing checkpoint represents partial training, not demonstrated convergence.
+- No confidence intervals or inferential statistical tests were calculated.
+- No correlation with image quality, LV size, or LV shape was evaluated.
+- No causal explanation for the observed phase difference was established.
+- No final test-set evaluation was performed.
+- Dice overlap does not establish anatomical correctness, diagnostic performance, or clinical validity.
+
+### Status
+
+Completed: patient-level ED/ES pairing, validation evaluation, descriptive statistical analysis, integrity checks, and CSV export.
+
+Qualitative investigation of difficult patient cases remains a possible follow-up experiment.
