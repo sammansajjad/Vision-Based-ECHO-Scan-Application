@@ -1,0 +1,720 @@
+===== 1. WEEK 4 COMMITS: FILES CHANGED =====
+--- e933638 | 2026-10-23 11:29:43 +0500 | docs: update CAMUS segmentation experiment log
+
+ docs/experiment_log.md | 310 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 309 insertions(+), 1 deletion(-)
+--- 3ede0da | 2026-10-23 11:00:27 +0500 | feat: add initial U-Net segmentation baseline
+
+ scripts/train_unet.py          | 244 +++++++++++++++++++++++++++++++++++++++++
+ src/cv_pipeline/models/unet.py |  98 +++++++++++++++++
+ src/cv_pipeline/prediction.py  |  44 ++++++++
+ tests/test_prediction.py       |  53 +++++++++
+ tests/test_unet.py             |  34 ++++++
+ 5 files changed, 473 insertions(+)
+--- a074482 | 2026-10-22 14:31:27 +0500 | feat: add CAMUS split loader, dataset and loader audit
+
+ .gitignore                       |   3 +-
+ scripts/audit_camus_dataset.py   |  66 ++++----
+ scripts/audit_camus_loader.py    | 136 ++++++++++++++++
+ src/cv_pipeline/camus_dataset.py | 163 +++++++++++++++++++
+ src/cv_pipeline/camus_splits.py  |  61 +++++++
+ tests/test_camus_dataset.py      | 336 +++++++++++++++++++++++++++++++++++++++
+ tests/test_camus_splits.py       |  91 +++++++++++
+ 7 files changed, 816 insertions(+), 40 deletions(-)
+--- 2bca72f | 2026-10-22 10:46:40 +0500 | feat: add Dice and IoU segmentation metrics
+
+ src/cv_pipeline/metrics.py |  60 ++++++++++++++++++++++
+ tests/test_metrics.py      | 124 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 184 insertions(+)
+===== 2. UNCOMMITTED CHANGES =====
+ M scripts/train_unet.py
+ M scripts/visualize_camus_frame.py
+?? evidence.txt
+?? scripts/evaluate_camus_split.py
+?? scripts/evaluate_one_frame.py
+?? src/cv_pipeline/postprocess.py
+ scripts/train_unet.py            | 168 ++++++++++++++++++++++++++---
+ scripts/visualize_camus_frame.py | 228 ++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 355 insertions(+), 41 deletions(-)
+===== 3. HISTORY OF TRAIN SCRIPT =====
+3ede0da 2026-10-23 11:00:27 +0500 feat: add initial U-Net segmentation baseline
+===== 4. TRAIN SCRIPT AS COMMITTED IN U-NET COMMIT =====
+
+"""Initial training loop for binary CAMUS 4CH LV segmentation."""
+
+import argparse
+import os
+import random
+
+import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+
+from cv_pipeline.camus_dataset import CAMUSDataset
+from cv_pipeline.metrics import dice_coefficient, iou_score
+from cv_pipeline.models.unet import UNet
+
+
+def set_seed(seed: int) -> None:
+    """Set random seeds for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def save_checkpoint(
+    path,
+    model,
+    optimizer,
+    epoch,
+    val_metrics,
+    seed,
+):
+    """Save model weights, optimizer state, and validation metrics."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "val_metrics": val_metrics,
+            "seed": seed,
+        },
+        path,
+    )
+
+    print(f"Checkpoint saved: {path}")
+
+
+def make_loader(
+    split: str,
+    batch_size: int,
+    shuffle: bool,
+) -> DataLoader:
+    """Create a CAMUS DataLoader for 4CH ED and ES frames."""
+    dataset = CAMUSDataset(
+        split=split,
+        view="4CH",
+        phases=("ED", "ES"),
+        target_size=(256, 256),
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,
+    )
+
+
+def evaluate(model, loader, device):
+    """Evaluate sample-weighted loss and frame-level Dice and IoU."""
+    model.eval()
+
+    dice_scores = []
+    iou_scores = []
+    loss_total = 0.0
+    sample_count = 0
+
+    criterion = nn.BCEWithLogitsLoss()
+
+    with torch.no_grad():
+        for batch in loader:
+            images = batch["image"].unsqueeze(1).to(device)
+            masks = batch["mask"].unsqueeze(1).float().to(device)
+
+            logits = model(images)
+            current_batch_size = images.shape[0]
+
+            loss_total += (
+                criterion(logits, masks).item() * current_batch_size
+            )
+            sample_count += current_batch_size
+
+            predictions = (
+                (torch.sigmoid(logits) >= 0.5)
+                .cpu()
+                .numpy()
+            )
+            truths = masks.cpu().numpy()
+
+            for prediction, truth in zip(
+                predictions[:, 0],
+                truths[:, 0],
+            ):
+                prediction = prediction.astype(np.uint8)
+                truth = truth.astype(np.uint8)
+
+                dice_scores.append(dice_coefficient(prediction, truth))
+                iou_scores.append(iou_score(prediction, truth))
+
+    if sample_count == 0:
+        raise ValueError("Cannot evaluate an empty DataLoader")
+
+    return {
+        "loss": loss_total / sample_count,
+        "dice": float(np.mean(dice_scores)),
+        "iou": float(np.mean(iou_scores)),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Train a U-Net for CAMUS 4CH LV segmentation."
+    )
+
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-train-batches", type=int, default=2)
+    parser.add_argument("--max-val-batches", type=int, default=2)
+
+    args = parser.parse_args()
+
+    if args.epochs < 1 or args.batch_size < 1:
+        parser.error("epochs and batch-size must be positive")
+
+    if args.max_train_batches < 0 or args.max_val_batches < 0:
+        parser.error("batch limits must be zero or positive")
+
+    set_seed(args.seed)
+    device = torch.device("cpu")
+
+    train_loader = make_loader(
+        "train",
+        args.batch_size,
+        shuffle=True,
+    )
+    val_loader = make_loader(
+        "validation",
+        args.batch_size,
+        shuffle=False,
+    )
+
+    model = UNet().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.BCEWithLogitsLoss()
+
+    checkpoint_path = os.path.join(
+        "outputs",
+        "checkpoints",
+        "unet_4ch_latest.pth",
+    )
+
+    parameter_count = sum(
+        parameter.numel() for parameter in model.parameters()
+    )
+
+    print(f"Device: {device}")
+    print(f"Seed: {args.seed}")
+    print(f"Batch size: {args.batch_size}")
+    print(f"Learning rate: {1e-3}")
+    print(f"Train samples: {len(train_loader.dataset)}")
+    print(f"Validation samples: {len(val_loader.dataset)}")
+    print(f"Model parameters: {parameter_count}")
+    print(f"Max train batches: {args.max_train_batches}")
+    print(f"Max validation batches: {args.max_val_batches}")
+
+    for epoch in range(args.epochs):
+        model.train()
+        batch_losses = []
+
+        for batch_index, batch in enumerate(train_loader):
+            if (
+                args.max_train_batches > 0
+                and batch_index >= args.max_train_batches
+            ):
+                break
+
+            images = batch["image"].unsqueeze(1).to(device)
+            masks = batch["mask"].unsqueeze(1).float().to(device)
+
+            optimizer.zero_grad()
+            logits = model(images)
+            loss = criterion(logits, masks)
+            loss.backward()
+            optimizer.step()
+
+            batch_losses.append(loss.item())
+
+        if not batch_losses:
+            raise ValueError("No training batches were processed.")
+
+        if (
+            args.max_val_batches > 0
+            and args.max_val_batches < len(val_loader)
+        ):
+            validation_batches = []
+
+            for index, batch in enumerate(val_loader):
+                if index >= args.max_val_batches:
+                    break
+                validation_batches.append(batch)
+
+            val_metrics = evaluate(
+                model,
+                validation_batches,
+                device,
+            )
+        else:
+            val_metrics = evaluate(model, val_loader, device)
+
+        print(
+            f"Epoch {epoch + 1}/{args.epochs} | "
+            f"train_loss={np.mean(batch_losses):.4f} | "
+            f"val_loss={val_metrics['loss']:.4f} | "
+            f"val_dice={val_metrics['dice']:.4f} | "
+            f"val_iou={val_metrics['iou']:.4f}"
+        )
+
+        save_checkpoint(
+            checkpoint_path,
+            model,
+            optimizer,
+            epoch + 1,
+            val_metrics,
+            args.seed,
+        )
+
+
+if __name__ == "__main__":
+    main()
+===== 5. REPO FILE LIST =====
+.gitignore
+README.md
+docs/decision_record_week2.md
+docs/experiment_log.md
+docs/pipeline_contract.md
+docs/supervisor_report_week1.md
+docs/supervisor_report_week2.md
+requirements.txt
+scripts/audit_camus_dataset.py
+scripts/audit_camus_loader.py
+scripts/exp003_sharpness_by_quality.py
+scripts/inspect_camus.py
+scripts/survey_camus_quality.py
+scripts/train_unet.py
+scripts/visualize_camus_frame.py
+src/cv_pipeline/__init__.py
+src/cv_pipeline/camus_adapter.py
+src/cv_pipeline/camus_dataset.py
+src/cv_pipeline/camus_metadata.py
+src/cv_pipeline/camus_splits.py
+src/cv_pipeline/contracts.py
+src/cv_pipeline/mask_utils.py
+src/cv_pipeline/metrics.py
+src/cv_pipeline/model_input.py
+src/cv_pipeline/models/unet.py
+src/cv_pipeline/pipeline.py
+src/cv_pipeline/prediction.py
+src/cv_pipeline/preprocessing.py
+src/cv_pipeline/quality.py
+src/cv_pipeline/quality_metrics.py
+tests/__init__.py
+tests/test_camus_dataset.py
+tests/test_camus_metadata.py
+tests/test_camus_splits.py
+tests/test_mask_utils.py
+tests/test_metrics.py
+tests/test_model_input.py
+tests/test_pipeline.py
+tests/test_prediction.py
+tests/test_preprocessing.py
+tests/test_quality.py
+tests/test_quality_metrics.py
+tests/test_real_data.py
+tests/test_unet.py
+===== 6. SOURCE FILES =====
+--- prediction.py
+"""Utilities for converting segmentation logits into binary masks."""
+
+import torch
+
+
+def logits_to_binary_masks(
+    logits: torch.Tensor,
+    threshold: float = 0.5,
+) -> torch.Tensor:
+    """Convert segmentation logits into binary masks.
+
+    Args:
+        logits: Raw model outputs, typically shaped [N, 1, H, W].
+        threshold: Probability threshold in [0, 1].
+
+    Returns:
+        Binary torch.uint8 tensor with the same shape as logits.
+    """
+    if not isinstance(logits, torch.Tensor):
+        raise TypeError("logits must be a torch.Tensor")
+
+    if not logits.is_floating_point():
+        raise TypeError("logits must have a floating-point dtype")
+
+    if logits.ndim != 4:
+        raise ValueError("logits must have shape [N, C, H, W]")
+
+    if logits.numel() == 0:
+        raise ValueError("logits must not be empty")
+
+    if not torch.isfinite(logits).all().item():
+        raise ValueError("logits must contain only finite values")
+
+    if not isinstance(threshold, (int, float)) or isinstance(
+        threshold, bool
+    ):
+        raise TypeError("threshold must be a number")
+
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("threshold must be between 0 and 1")
+
+    probabilities = torch.sigmoid(logits)
+
+    return (probabilities >= threshold).to(torch.uint8)--- mask_utils.py
+
+import numpy as np
+
+
+CAMUS_LABELS = {0, 1, 2, 3}
+LV_CAVITY_LABEL = 1
+
+
+def to_binary_lv_mask(mask: np.ndarray) -> np.ndarray:
+    """Convert original CAMUS labels into a binary LV-cavity mask.
+
+    Original labels:
+        0: background
+        1: LV cavity
+        2: LV myocardium
+        3: left atrium
+
+    Returns:
+        A uint8 array where 1 represents the LV cavity and 0 represents
+        everything else. The input annotation is not modified.
+    """
+    mask = np.asarray(mask)
+
+    if mask.ndim != 2:
+        raise ValueError(f"Expected a 2D mask, received shape {mask.shape}")
+
+    if mask.size == 0:
+        raise ValueError("Mask must not be empty")
+
+    if not np.issubdtype(mask.dtype, np.number):
+        raise ValueError("Mask must contain numeric labels")
+
+    if not np.isfinite(mask).all():
+        raise ValueError("Mask contains NaN or infinite values")
+
+    observed_labels = set(np.unique(mask).tolist())
+    unexpected_labels = observed_labels - CAMUS_LABELS
+
+    if unexpected_labels:
+        raise ValueError(
+            f"Unexpected CAMUS labels: {sorted(unexpected_labels)}"
+        )
+
+    return (mask == LV_CAVITY_LABEL).astype(np.uint8)
+--- model_input.py
+
+from dataclasses import dataclass
+
+import cv2
+import numpy as np
+
+
+@dataclass(frozen=True)
+class GeometryTransform:
+    """Record the geometry used to prepare an image for model input.
+
+    All dimensions use (height, width) ordering.
+    Padding values are measured in pixels on their named sides.
+    """
+
+    original_height: int
+    original_width: int
+
+    resized_height: int
+    resized_width: int
+
+    pad_top: int
+    pad_bottom: int
+    pad_left: int
+    pad_right: int
+
+    target_height: int
+    target_width: int
+
+
+def transform_image(
+    image: np.ndarray,
+    target_size: tuple[int, int] = (256, 256),
+) -> tuple[np.ndarray, GeometryTransform]:
+    """Resize a 2D image proportionally and pad it to the target size."""
+
+    if not isinstance(image, np.ndarray):
+        raise TypeError("image must be a NumPy array")
+
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array")
+
+    if image.size == 0:
+        raise ValueError("image must not be empty")
+
+    if not np.issubdtype(image.dtype, np.number):
+        raise TypeError("image must contain numeric values")
+
+    if not np.isfinite(image).all():
+        raise ValueError("image must contain only finite values")
+
+    if (
+        not isinstance(target_size, tuple)
+        or len(target_size) != 2
+        or any(
+            isinstance(size, (bool, np.bool_))
+            or not isinstance(size, (int, np.integer))
+            or size <= 0
+            for size in target_size
+        )
+    ):
+        raise ValueError(
+            "target_size must be a tuple of two positive integers "
+            "(height, width)"
+        )
+
+    original_height, original_width = image.shape
+    target_height, target_width = target_size
+
+    # Fit the image inside the target dimensions without changing
+    # its aspect ratio.
+    scale = min(
+        target_height / original_height,
+        target_width / original_width,
+    )
+
+    resized_height = min(
+        target_height,
+        max(1, round(original_height * scale)),
+    )
+    resized_width = min(
+        target_width,
+        max(1, round(original_width * scale)),
+    )
+
+    # Center the resized image. An odd extra padding pixel goes
+    # to the bottom or right.
+    remaining_height = target_height - resized_height
+    remaining_width = target_width - resized_width
+
+    pad_top = remaining_height // 2
+    pad_bottom = remaining_height - pad_top
+    pad_left = remaining_width // 2
+    pad_right = remaining_width - pad_left
+
+    resized_image = cv2.resize(
+        image,
+        (resized_width, resized_height),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+    transformed_image = cv2.copyMakeBorder(
+        resized_image,
+        pad_top,
+        pad_bottom,
+        pad_left,
+        pad_right,
+        borderType=cv2.BORDER_CONSTANT,
+        value=0,
+    )
+
+    geometry = GeometryTransform(
+        original_height=original_height,
+        original_width=original_width,
+        resized_height=resized_height,
+        resized_width=resized_width,
+        pad_top=pad_top,
+        pad_bottom=pad_bottom,
+        pad_left=pad_left,
+        pad_right=pad_right,
+        target_height=target_height,
+        target_width=target_width,
+    )
+
+    return transformed_image, geometry
+
+
+def transform_image_and_mask(
+    image: np.ndarray,
+    mask: np.ndarray,
+    target_size: tuple[int, int] = (256, 256),
+) -> tuple[np.ndarray, np.ndarray, GeometryTransform]:
+    """Transform an image and binary mask using identical geometry.
+
+    Image interpolation is linear; mask interpolation is nearest-neighbor.
+    Both are centered in the target dimensions using zero-padding.
+
+    Returns:
+        Transformed image, transformed uint8 binary mask, and geometry.
+    """
+
+    # Validate the image before accessing its shape.
+    if not isinstance(image, np.ndarray):
+        raise TypeError("image must be a NumPy array")
+
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array")
+
+    if image.size == 0:
+        raise ValueError("image must not be empty")
+
+    if not np.issubdtype(image.dtype, np.number):
+        raise TypeError("image must contain numeric values")
+
+    if not np.isfinite(image).all():
+        raise ValueError("image must contain only finite values")
+
+    # Validate the binary mask.
+    if not isinstance(mask, np.ndarray):
+        raise TypeError("mask must be a NumPy array")
+
+    if mask.ndim != 2:
+        raise ValueError("mask must be a 2D array")
+
+    if mask.size == 0:
+        raise ValueError("mask must not be empty")
+
+    if not np.issubdtype(mask.dtype, np.number):
+        raise TypeError("mask must contain numeric values")
+
+    if not np.isfinite(mask).all():
+        raise ValueError("mask must contain only finite values")
+
+    if not np.isin(mask, [0, 1]).all():
+        raise ValueError("mask must be binary, containing only 0 and 1")
+
+    if image.shape != mask.shape:
+        raise ValueError(
+            "image and mask must have the same spatial dimensions"
+        )
+
+    # transform_image validates target_size and calculates the geometry.
+    transformed_image, geometry = transform_image(image, target_size)
+
+    # Use the exact same resized dimensions and padding for the mask.
+    # Nearest-neighbor interpolation preserves discrete mask labels.
+    resized_mask = cv2.resize(
+        mask,
+        (geometry.resized_width, geometry.resized_height),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    transformed_mask = cv2.copyMakeBorder(
+        resized_mask,
+        geometry.pad_top,
+        geometry.pad_bottom,
+        geometry.pad_left,
+        geometry.pad_right,
+        borderType=cv2.BORDER_CONSTANT,
+        value=0,
+    )
+
+    transformed_mask = transformed_mask.astype(np.uint8, copy=False)
+
+    return transformed_image, transformed_mask, geometry
+--- camus_splits.py
+
+from pathlib import Path
+
+
+DEFAULT_SPLIT_ROOT = Path("data/raw/CAMUS_public/database_split")
+
+SPLIT_FILES = {
+    "train": "subgroup_training.txt",
+    "validation": "subgroup_validation.txt",
+    "test": "subgroup_testing.txt",
+}
+
+
+def load_split_patient_ids(
+    root: Path = DEFAULT_SPLIT_ROOT,
+) -> dict[str, list[str]]:
+    """Load and validate all official CAMUS patient splits."""
+    root = Path(root)
+    split_ids = {}
+
+    for split_name, filename in SPLIT_FILES.items():
+        path = root / filename
+
+        if not path.is_file():
+            raise FileNotFoundError(f"Split file not found: {path}")
+
+        patient_ids = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        if len(patient_ids) != len(set(patient_ids)):
+            raise ValueError(f"Duplicate patient IDs in {path}")
+
+        split_ids[split_name] = patient_ids
+
+    all_ids = [
+        patient_id
+        for patient_ids in split_ids.values()
+        for patient_id in patient_ids
+    ]
+
+    if len(all_ids) != len(set(all_ids)):
+        raise ValueError("Patient IDs overlap across official split files")
+
+    return split_ids
+
+
+def get_split_patient_ids(
+    split: str,
+    root: Path = DEFAULT_SPLIT_ROOT,
+) -> list[str]:
+    """Return patient IDs for one official split."""
+    if split not in SPLIT_FILES:
+        raise ValueError(
+            f"Unknown split {split!r}; expected one of "
+            f"{tuple(SPLIT_FILES)}"
+        )
+
+    return load_split_patient_ids(root)[split]
+===== 7. CHECKPOINT FILES =====
+ Volume in drive E is New Volume
+ Volume Serial Number is 36C6-81E9
+
+ Directory of E:\Vision Based ECHO Scan Application\outputs\checkpoints
+
+10/23/2026  12:00 PM    <DIR>          .
+10/22/2026  12:51 PM    <DIR>          ..
+10/23/2026  02:27 PM        23,416,891 unet_4ch_best_full_validation.pth
+10/23/2026  02:27 PM        23,412,403 unet_4ch_latest.pth
+10/22/2026  12:41 PM        23,412,339 unet_4ch_smoke1_backup.pth
+               3 File(s)     70,241,633 bytes
+               2 Dir(s)  51,646,660,608 bytes free
+ Volume in drive E is New Volume
+ Volume Serial Number is 36C6-81E9
+
+ Directory of E:\Vision Based ECHO Scan Application\outputs\evaluations
+
+10/22/2026  12:51 PM    <DIR>          .
+10/22/2026  12:51 PM    <DIR>          ..
+10/22/2026  02:12 PM           800,325 patient0200_4CH_ED_comparison.png
+               1 File(s)        800,325 bytes
+               2 Dir(s)  51,646,660,608 bytes free
+===== 8. PARAMETER COUNT =====
+total 1942289 trainable 1942289
+===== 9. LATEST CHECKPOINT METADATA =====
+['epoch', 'model_state_dict', 'optimizer_state_dict', 'val_metrics', 'seed', 'validation_protocol']
+epoch 1 seed 42
+{'loss': 0.16523663997650145, 'dice': 0.8717586954626387, 'iou': 0.7774530971806173}
+full_validation
+===== 10. TESTS: FULL RESULT =====
+E:\Vision Based ECHO Scan Application\venv\Scripts\python.exe: No module named pytest

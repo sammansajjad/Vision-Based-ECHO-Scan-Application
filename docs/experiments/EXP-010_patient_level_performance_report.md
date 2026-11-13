@@ -1,8 +1,8 @@
-\# EXP-010 — Patient-Level ED/ES Segmentation Performance Analysis
+# EXP-010 — Patient-Level ED/ES Segmentation Performance Analysis
 
 
 
-\## 1. Objective
+## 1. Objective
 
 
 
@@ -18,23 +18,23 @@ This is a descriptive validation experiment. It does not attempt to establish st
 
 
 
-\## 2. Dataset and Evaluation Protocol
+## 2. Dataset and Evaluation Protocol
 
 
 
-\*\*Dataset:\*\* CAMUS public dataset
+**Dataset:** CAMUS public dataset
 
-\*\*Split:\*\* Official validation split
+**Split:** Official validation split
 
-\*\*View:\*\* 4CH
+**View:** 4CH
 
-\*\*Target:\*\* Binary LV cavity segmentation
+**Target:** Binary LV cavity segmentation
 
-\*\*Phases:\*\* ED and ES
+**Phases:** ED and ES
 
-\*\*Patients:\*\* 50
+**Patients:** 50
 
-\*\*Frames:\*\* 100 (50 ED and 50 ES)
+**Frames:** 100 (50 ED and 50 ES)
 
 
 
@@ -46,7 +46,7 @@ The test split was not used.
 
 
 
-\### 2.1 Input preparation
+### 2.1 Input preparation
 
 
 
@@ -54,17 +54,17 @@ The existing `CAMUSDataset` implementation was reused.
 
 
 
-\- Target input dimensions: 256 × 256.
+- Target input dimensions: 256 × 256.
 
-\- Aspect-ratio-preserving resizing and centered zero-padding.
+- Aspect-ratio-preserving resizing and centered zero-padding.
 
-\- Linear interpolation for images.
+- Linear interpolation for images.
 
-\- Nearest-neighbor interpolation for masks.
+- Nearest-neighbor interpolation for masks.
 
-\- Image intensity conversion to float32 and division by 255.
+- Image intensity conversion to float32 and division by 255.
 
-\- Binary LV cavity masks generated through the existing CAMUS mask conversion function.
+- Binary LV cavity masks generated through the existing CAMUS mask conversion function.
 
 
 
@@ -72,7 +72,7 @@ No new preprocessing transformation was introduced.
 
 
 
-\## 3. Model and Inference Configuration
+## 3. Model and Inference Configuration
 
 
 
@@ -92,7 +92,7 @@ The existing U-Net checkpoint was evaluated without retraining.
 
 | Parameters | 1,942,289 |
 
-| Checkpoint | `outputs/checkpoints/unet\_4ch\_best\_full\_validation.pth` |
+| Checkpoint | `outputs/checkpoints/unet_4ch_best_full_validation.pth` |
 
 | Device | CPU |
 
@@ -122,7 +122,7 @@ The same model architecture, checkpoint, input preparation, inference approach, 
 
 
 
-\## 4. Patient-Level Pairing Method
+## 4. Patient-Level Pairing Method
 
 
 
@@ -130,13 +130,13 @@ Each evaluated sample provided:
 
 
 
-\- `patient\_id`
+- `patient_id`
 
-\- `phase`
+- `phase`
 
-\- `image`
+- `image`
 
-\- `mask`
+- `mask`
 
 
 
@@ -148,19 +148,19 @@ For each patient:
 
 
 
-\*\*Patient mean Dice\*\*
+**Patient mean Dice**
 
 
 
-`mean\_dice = (ED\_dice + ES\_dice) / 2`
+`mean_dice = (ED_dice + ES_dice) / 2`
 
 
 
-\*\*ED–ES difference\*\*
+**ED–ES difference**
 
 
 
-`ED\_minus\_ES = ED\_dice - ES\_dice`
+`ED_minus_ES = ED_dice - ES_dice`
 
 
 
@@ -168,11 +168,11 @@ Interpretation:
 
 
 
-\- Positive difference: ED Dice is higher.
+- Positive difference: ED Dice is higher.
 
-\- Negative difference: ES Dice is higher.
+- Negative difference: ES Dice is higher.
 
-\- Zero difference: Both phases have equal Dice.
+- Zero difference: Both phases have equal Dice.
 
 
 
@@ -180,19 +180,19 @@ The script checked the following integrity conditions:
 
 
 
-\- Exactly 50 unique validation patients.
+- Exactly 50 unique validation patients.
 
-\- Exactly 100 evaluated frames.
+- Exactly 100 evaluated frames.
 
-\- Exactly 50 ED frames.
+- Exactly 50 ED frames.
 
-\- Exactly 50 ES frames.
+- Exactly 50 ES frames.
 
-\- No duplicate patient-phase pairs.
+- No duplicate patient-phase pairs.
 
-\- No missing ED or ES phases.
+- No missing ED or ES phases.
 
-\- Exactly one ED/ES pair per patient.
+- Exactly one ED/ES pair per patient.
 
 
 
@@ -200,11 +200,11 @@ All checks passed.
 
 
 
-\## 5. Observed Results
+## 5. Observed Results
 
 
 
-\### 5.1 Overall phase-level performance
+### 5.1 Overall phase-level performance
 
 
 
@@ -222,7 +222,7 @@ The mean ED Dice was higher than the mean ES Dice by 0.037231.
 
 
 
-\### 5.2 Patient-level performance statistics
+### 5.2 Patient-level performance statistics
 
 
 
@@ -246,7 +246,7 @@ The patient-level standard deviation was calculated using population standard de
 
 
 
-\### 5.3 ED–ES paired differences
+### 5.3 ED–ES paired differences
 
 
 
@@ -274,7 +274,7 @@ These counts describe the observed validation patients and do not establish a st
 
 
 
-\### 5.4 Five lowest-performing patients
+### 5.4 Five lowest-performing patients
 
 
 
@@ -298,7 +298,7 @@ Patients are ranked by their mean ED/ES Dice.
 
 
 
-\### 5.5 Five highest-performing patients
+### 5.5 Five highest-performing patients
 
 
 
@@ -318,7 +318,7 @@ Patients are ranked by their mean ED/ES Dice.
 
 
 
-\## 6. Interpretation
+## 6. Interpretation
 
 
 
@@ -342,9 +342,9 @@ Two particularly weak ES cases were:
 
 
 
-\- `patient0291`: ES Dice 0.6745.
+- `patient0291`: ES Dice 0.6745.
 
-\- `patient0314`: ES Dice 0.6525.
+- `patient0314`: ES Dice 0.6525.
 
 
 
@@ -364,7 +364,7 @@ The observed ED–ES difference is descriptive. No inferential statistical test 
 
 
 
-\## 7. Relationship to EXP-009
+## 7. Relationship to EXP-009
 
 
 
@@ -388,57 +388,57 @@ EXP-010 does not change the threshold decision made in EXP-009.
 
 
 
-\## 8. Limitations
+## 8. Limitations
 
 
 
-\- Evaluation was restricted to 50 official validation patients from the CAMUS 4CH view.
+- Evaluation was restricted to 50 official validation patients from the CAMUS 4CH view.
 
-\- Only ED and ES frames were evaluated.
+- Only ED and ES frames were evaluated.
 
-\- Results depend on the existing checkpoint and its training state.
+- Results depend on the existing checkpoint and its training state.
 
-\- The checkpoint represents partial training rather than a fully trained or demonstrated-converged model.
+- The checkpoint represents partial training rather than a fully trained or demonstrated-converged model.
 
-\- No confidence intervals or inferential statistical tests were calculated.
+- No confidence intervals or inferential statistical tests were calculated.
 
-\- No correlation analysis with expert image quality, LV size, or LV shape was performed.
+- No correlation analysis with expert image quality, LV size, or LV shape was performed.
 
-\- No causal explanation for the ED–ES performance difference was established.
+- No causal explanation for the ED–ES performance difference was established.
 
-\- No physical-coordinate measurements or volume estimates were evaluated.
+- No physical-coordinate measurements or volume estimates were evaluated.
 
-\- No final test-set evaluation was performed.
+- No final test-set evaluation was performed.
 
-\- Dice measures segmentation overlap and does not establish anatomical correctness, diagnostic performance, or clinical suitability.
-
-
-
-\## 9. Reproducibility
+- Dice measures segmentation overlap and does not establish anatomical correctness, diagnostic performance, or clinical suitability.
 
 
 
-\*\*Analysis script:\*\*
+## 9. Reproducibility
 
 
 
-`scripts/analyze\_patient\_performance.py`
+**Analysis script:**
 
 
 
-\*\*Checkpoint:\*\*
+`scripts/analyze_patient_performance.py`
 
 
 
-`outputs/checkpoints/unet\_4ch\_best\_full\_validation.pth`
+**Checkpoint:**
 
 
 
-\*\*Exported patient-level results:\*\*
+`outputs/checkpoints/unet_4ch_best_full_validation.pth`
 
 
 
-`outputs/evaluations/exp010\_patient\_performance.csv`
+**Exported patient-level results:**
+
+
+
+`outputs/evaluations/exp010_patient_performance.csv`
 
 
 
@@ -446,15 +446,15 @@ The CSV contains one row per patient and the following fields:
 
 
 
-\- `patient\_id`
+- `patient_id`
 
-\- `ED\_dice`
+- `ED_dice`
 
-\- `ES\_dice`
+- `ES_dice`
 
-\- `mean\_dice`
+- `mean_dice`
 
-\- `ED\_minus\_ES`
+- `ED_minus_ES`
 
 
 
@@ -468,7 +468,7 @@ To reproduce the experiment from the project root:
 
 ```cmd
 
-python scripts\\analyze\_patient\_performance.py
+python scripts\\analyze_patient_performance.py
 
 ```
 
@@ -478,7 +478,7 @@ The script refuses to overwrite an existing CSV with the same filename.
 
 
 
-\## 10. Conclusion
+## 10. Conclusion
 
 
 
@@ -498,4 +498,4 @@ The experiment provides a descriptive basis for subsequent qualitative failure a
 
 
 
-\*\*Status: Completed — validation-only descriptive analysis.\*\*
+**Status: Completed — validation-only descriptive analysis.**

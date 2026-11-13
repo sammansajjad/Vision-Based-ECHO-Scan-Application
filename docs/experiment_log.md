@@ -694,4 +694,152 @@ The global threshold of 0.50 from EXP-009 was retained. No phase-specific thresh
 
 Completed: patient-level ED/ES pairing, validation evaluation, descriptive statistical analysis, integrity checks, and CSV export.
 
-Qualitative investigation of difficult patient cases remains a possible follow-up experiment.
+Qualitative investigation of difficult patient cases was subsequently conducted in EXP-011.
+
+## EXP-011 - Qualitative Investigation of Difficult Patient Cases in LV Segmentation
+
+### Purpose
+
+Investigate difficult patient-level validation cases identified during EXP-010 to understand the behavior and limitations of the existing U-Net LV cavity segmentation baseline.
+
+The experiment aimed to characterize segmentation errors through quantitative TP/FP/FN analysis and qualitative visualization of selected ED and ES frames.
+
+The investigation focused on understanding whether difficult cases demonstrated under-segmentation, over-segmentation, or spatial disagreement between predicted and ground-truth LV cavity masks.
+
+### Method
+
+`scripts/analyze_failure_cases.py` evaluated selected difficult cases from the official CAMUS 4CH validation split.
+
+The experiment investigated four patient-phase combinations:
+
+- patient0291 ES.
+- patient0314 ES.
+- patient0284 ED.
+- patient0284 ES.
+
+The existing U-Net checkpoint, `outputs/checkpoints/unet_4ch_best_full_validation.pth`, was used with the existing preprocessing pipeline and a global probability threshold of 0.50.
+
+Predictions were generated using sigmoid probabilities followed by binary thresholding. No post-processing, retraining, fine-tuning, or preprocessing modifications were applied.
+
+For each selected case, the script loaded the original-resolution ultrasound image and corresponding dedicated ED/ES annotation.
+
+The original annotation was converted into a binary LV cavity mask and transformed using the existing 256 × 256 preprocessing pipeline.
+
+Original-to-model mask correspondence and geometry metadata were checked before inference.
+
+The following quantitative measurements were calculated:
+
+- Ground-truth foreground pixels.
+- Predicted foreground pixels.
+- True-positive pixels.
+- False-positive pixels.
+- False-negative pixels.
+- Dice coefficient.
+- Intersection over Union (IoU).
+- Relative foreground area difference.
+
+Relative foreground area difference was calculated as:
+
+`((Predicted pixels - Ground-truth pixels) / Ground-truth pixels) × 100`
+
+A six-panel visualization was generated for each case, containing the original ultrasound image, ground-truth mask, predicted mask, ground-truth overlay, prediction overlay, and TP/FP/FN error map.
+
+The error map represented true-positive pixels in green, false-positive pixels in red, and false-negative pixels in blue.
+
+Quantitative results were exported into separate CSV files for each patient-phase combination.
+
+### Observed Evidence
+
+**\*\*Experimental execution and integrity checks:\*\***
+
+- Difficult validation cases investigated: 4.
+- View: 4CH.
+- Phases: ED and ES.
+- Model input dimensions: 256 × 256.
+- Probability threshold: 0.50.
+- Device: CPU.
+- Original-to-model mask correspondence: PASS for all four cases.
+- Geometry metadata comparison: PASS for all four cases.
+- Existing checkpoint loaded successfully for all four cases.
+- Four qualitative visualization figures generated.
+- Four quantitative CSV files generated.
+- Existing patient0291 results were preserved.
+
+**\*\*Quantitative results:\*\***
+
+| Patient | Phase | Ground-truth pixels | Predicted pixels | TP | FP | FN |
+|---|---|---:|---:|---:|---:|---:|
+| patient0291 | ES | 3,793 | 2,045 | 1,969 | 76 | 1,824 |
+| patient0314 | ES | 2,433 | 2,919 | 1,746 | 1,173 | 687 |
+| patient0284 | ED | 6,072 | 7,221 | 5,047 | 2,174 | 1,025 |
+| patient0284 | ES | 5,111 | 6,698 | 4,372 | 2,326 | 739 |
+
+**\*\*Segmentation overlap metrics:\*\***
+
+| Patient | Phase | Dice | IoU |
+|---|---|---:|---:|
+| patient0291 | ES | 0.674546 | 0.508917 |
+| patient0314 | ES | 0.652466 | 0.484193 |
+| patient0284 | ED | 0.759347 | 0.612054 |
+| patient0284 | ES | 0.740452 | 0.587871 |
+
+**\*\*Relative foreground area difference:\*\***
+
+- patient0291 ES: -46.08%.
+- patient0314 ES: +19.98%.
+- patient0284 ED: +18.92%.
+- patient0284 ES: +31.05%.
+
+**\*\*Qualitative observations:\*\***
+
+- patient0291 ES showed substantial under-segmentation. The prediction captured the central portion of the ground-truth LV region but underestimated its overall spatial extent. False-negative pixels (1,824) substantially exceeded false-positive pixels (76).
+- patient0314 ES showed predominantly over-segmentation. The prediction included additional foreground regions outside the ground-truth LV mask. False-positive pixels (1,173) exceeded false-negative pixels (687).
+- patient0284 ED showed predominantly over-segmentation, with the predicted foreground region extending beyond the ground-truth annotation. The error map contained 2,174 false-positive pixels and 1,025 false-negative pixels.
+- patient0284 ES also showed predominantly over-segmentation. The predicted foreground area was larger than the ground-truth region, with 2,326 false-positive pixels compared with 739 false-negative pixels.
+
+**\*\*ED/ES comparison for patient0284:\*\***
+
+- ED achieved a Dice score of 0.759347, while ES achieved 0.740452.
+- ES produced more false-positive pixels than ED (2,326 compared with 2,174).
+- ES produced fewer false-negative pixels than ED (739 compared with 1,025).
+- Relative foreground area difference increased from +18.92% in ED to +31.05% in ES.
+- Both phases demonstrated predominantly over-segmentation.
+
+### Interpretation
+
+The four investigated cases demonstrated different patterns of LV cavity segmentation errors.
+
+patient0291 ES showed predominantly under-segmentation, with a substantially smaller predicted foreground region and a high number of false-negative pixels.
+
+In contrast, patient0314 ES, patient0284 ED, and patient0284 ES demonstrated predominantly over-segmentation, with predicted foreground areas larger than their corresponding ground-truth regions.
+
+The patient0284 phase comparison showed lower Dice performance in ES than ED, together with a greater relative foreground area difference and more false-positive pixels.
+
+These findings demonstrate that difficult segmentation cases can exhibit different types of spatial disagreement, even when evaluated using the same model, preprocessing pipeline, and probability threshold.
+
+The qualitative visualizations supported the quantitative error measurements and provided additional insight into the spatial distribution of segmentation errors.
+
+However, the investigation does not establish the underlying causes of these errors or demonstrate that a particular preprocessing or model modification would improve performance.
+
+The existing global probability threshold of 0.50 was retained, and no changes were made to the baseline model or evaluation protocol.
+
+### Limitations
+
+- Investigation covered only four selected patient-phase combinations from the official validation split and 4CH view.
+- The selected cases were identified from previous validation findings and do not represent a random sample of the validation population.
+- The existing checkpoint represents partial training, not demonstrated convergence.
+- No retraining, fine-tuning, threshold optimization, or post-processing was performed.
+- No independent test-set evaluation was performed.
+- Pixel counts represent foreground pixels in the transformed 256 × 256 masks, not physical LV area or volume.
+- Relative foreground area difference does not represent clinical measurement error.
+- No anatomical correctness assessment of the ground-truth annotations was performed.
+- No causal investigation was conducted to establish why the observed segmentation errors occurred.
+- Dice and IoU overlap metrics do not establish anatomical correctness, diagnostic performance, or clinical validity.
+
+### Status
+
+Completed: investigation of four difficult validation cases, original-to-model mask correspondence verification, geometry metadata checks, quantitative TP/FP/FN analysis, Dice and IoU calculation, relative foreground area analysis, qualitative visualization generation, and patient-specific CSV exports.
+
+The experiment identified both under-segmentation and over-segmentation patterns across the selected cases.
+
+The existing U-Net checkpoint, preprocessing pipeline, and global probability threshold of 0.50 were retained without modification. No model improvement or clinical validation is claimed.

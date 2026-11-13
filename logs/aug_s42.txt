@@ -1,0 +1,13 @@
+Device: cpu
+Seed: 42
+Batch size: 2
+Learning rate: 0.001
+Train samples: 800
+Validation samples: 100
+Model parameters: 1942289
+Max train batches: 0
+Max validation batches: 0
+Validation protocol: full_validation
+Augment: True
+Run name: aug_s42
+Best validation Dice for this protocol: -1.0000
