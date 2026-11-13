@@ -4,6 +4,10 @@ from typing import Callable
 import numpy as np
 from torch.utils.data import Dataset
 
+from cv_pipeline.augmentation import (
+    AugmentationConfig,
+    augment_image_and_mask,
+)
 from cv_pipeline.camus_adapter import load_camus_frame
 from cv_pipeline.camus_splits import (
     DEFAULT_SPLIT_ROOT,
@@ -43,6 +47,8 @@ class CAMUSDataset(Dataset):
         target_size: tuple[int, int] = (256, 256),
         split_root=DEFAULT_SPLIT_ROOT,
         frame_loader: FrameLoader = load_camus_frame,
+        augment: bool = False,
+        augment_seed: int = 0,
     ):
         split = split.lower()
         view = view.upper()
@@ -80,11 +86,28 @@ class CAMUSDataset(Dataset):
                 "target_size must be a tuple of two positive integers"
             )
 
+        if not isinstance(augment, bool):
+            raise TypeError("augment must be a bool")
+
+        if isinstance(augment_seed, (bool, np.bool_)) or not isinstance(
+            augment_seed, (int, np.integer)
+        ):
+            raise TypeError("augment_seed must be an int")
+
+        if augment_seed < 0:
+            raise ValueError("augment_seed must be non-negative")
+
         self.split = split
         self.view = view
         self.phases = phases
         self.target_size = tuple(int(size) for size in target_size)
         self.frame_loader = frame_loader
+        self.augment = augment
+        self.augment_seed = int(augment_seed)
+
+        if self.augment:
+            self._augment_config = AugmentationConfig()
+            self._rng = np.random.default_rng(self.augment_seed)
 
         split_ids = load_split_patient_ids(split_root)
         self.patient_ids = tuple(split_ids[split])
@@ -149,7 +172,10 @@ class CAMUSDataset(Dataset):
         normalized_image = (
             transformed_image.astype(np.float32, copy=False) / 255.0
         )
-        return {
+        # "geometry" and "pixel_spacing" describe the
+        # pre-augmentation 256x256 mapping; augmentation does not
+        # update them.
+        sample = {
             "image": normalized_image,
             "mask": transformed_mask,
             "patient_id": patient_id,
@@ -161,3 +187,18 @@ class CAMUSDataset(Dataset):
                 for name in geometry.__dataclass_fields__
             },
         }
+
+        if self.augment:
+            augmented_image, augmented_mask, augmentation_params = (
+                augment_image_and_mask(
+                    normalized_image,
+                    transformed_mask,
+                    self._rng,
+                    self._augment_config,
+                )
+            )
+            sample["image"] = augmented_image
+            sample["mask"] = augmented_mask
+            sample["augmentation"] = augmentation_params
+
+        return sample

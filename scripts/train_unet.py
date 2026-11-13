@@ -4,6 +4,7 @@
 import argparse
 import os
 import random
+import re
 
 import numpy as np
 import torch
@@ -30,6 +31,9 @@ def save_checkpoint(
     val_metrics,
     seed,
     validation_protocol,
+    *,
+    augment=False,
+    run_name="",
 ):
     """Save model weights, optimizer state, and validation metadata."""
     directory = os.path.dirname(path)
@@ -44,6 +48,8 @@ def save_checkpoint(
             "val_metrics": val_metrics,
             "seed": seed,
             "validation_protocol": validation_protocol,
+            "augment": augment,
+            "run_name": run_name,
         },
         path,
     )
@@ -99,6 +105,7 @@ def make_loader(
     split: str,
     batch_size: int,
     shuffle: bool,
+    augment: bool = False,
 ) -> DataLoader:
     """Create a CAMUS DataLoader for 4CH ED and ES frames."""
     dataset = CAMUSDataset(
@@ -106,6 +113,7 @@ def make_loader(
         view="4CH",
         phases=("ED", "ES"),
         target_size=(256, 256),
+        augment=augment,
     )
 
     return DataLoader(
@@ -213,6 +221,25 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--augment",
+        action="store_true",
+        help=(
+            "Enable training-only data augmentation (requires "
+            "--run-name; default: off)."
+        ),
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default="",
+        help=(
+            "Suffix for checkpoint file names so runs do not "
+            "overwrite each other (letters, digits, - and _ only; "
+            "default: none, which keeps the original file names)."
+        ),
+    )
+
     args = parser.parse_args()
 
     if args.epochs < 1 or args.batch_size < 1:
@@ -221,6 +248,14 @@ def main():
     if args.max_train_batches < 0 or args.max_val_batches < 0:
         parser.error("batch limits must be zero or positive")
 
+    if args.run_name and not re.fullmatch(r"[A-Za-z0-9_-]+", args.run_name):
+        parser.error(
+            "--run-name may contain only letters, digits, '-' and '_'"
+        )
+
+    if args.augment and not args.run_name:
+        parser.error("--augment requires --run-name")
+
     set_seed(args.seed)
     device = torch.device("cpu")
 
@@ -228,6 +263,7 @@ def main():
         "train",
         args.batch_size,
         shuffle=True,
+        augment=args.augment,
     )
     val_loader = make_loader(
         "validation",
@@ -244,9 +280,12 @@ def main():
 
     checkpoint_dir = os.path.join("outputs", "checkpoints")
 
+    # An empty run name keeps the original checkpoint file names.
+    run_suffix = f"_{args.run_name}" if args.run_name else ""
+
     latest_checkpoint_path = os.path.join(
         checkpoint_dir,
-        "unet_4ch_latest.pth",
+        f"unet_4ch_latest{run_suffix}.pth",
     )
 
     if args.max_val_batches == 0:
@@ -258,7 +297,7 @@ def main():
 
     best_checkpoint_path = os.path.join(
         checkpoint_dir,
-        f"unet_4ch_best_{validation_protocol}.pth",
+        f"unet_4ch_best_{validation_protocol}{run_suffix}.pth",
     )
 
     best_dice = load_best_dice(
@@ -281,6 +320,8 @@ def main():
     print(f"Max train batches: {args.max_train_batches}")
     print(f"Max validation batches: {args.max_val_batches}")
     print(f"Validation protocol: {validation_protocol}")
+    print(f"Augment: {args.augment}")
+    print(f"Run name: {args.run_name or '(none)'}")
     print(f"Best validation Dice for this protocol: {best_dice:.4f}")
 
     for epoch in range(args.epochs):
@@ -351,6 +392,8 @@ def main():
             val_metrics,
             args.seed,
             validation_protocol,
+            augment=args.augment,
+            run_name=args.run_name,
         )
 
         # Preserve the best result for this validation protocol.
@@ -365,6 +408,8 @@ def main():
                 val_metrics,
                 args.seed,
                 validation_protocol,
+                augment=args.augment,
+                run_name=args.run_name,
             )
             best_dice = current_dice
             print(f"New best validation Dice: {best_dice:.4f}")
