@@ -1,5 +1,5 @@
 
-"""Initial training loop for binary CAMUS 4CH LV segmentation."""
+"""Training loop for binary CAMUS 4CH LV segmentation."""
 
 import argparse
 import os
@@ -29,8 +29,9 @@ def save_checkpoint(
     epoch,
     val_metrics,
     seed,
+    validation_protocol,
 ):
-    """Save model weights, optimizer state, and validation metrics."""
+    """Save model weights, optimizer state, and validation metadata."""
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -42,11 +43,56 @@ def save_checkpoint(
             "optimizer_state_dict": optimizer.state_dict(),
             "val_metrics": val_metrics,
             "seed": seed,
+            "validation_protocol": validation_protocol,
         },
         path,
     )
 
     print(f"Checkpoint saved: {path}")
+
+
+def load_best_dice(path, validation_protocol) -> float:
+    """Load the best Dice score for the matching validation protocol."""
+    if not os.path.exists(path):
+        return -1.0
+
+    try:
+        checkpoint = torch.load(
+            path,
+            map_location="cpu",
+            weights_only=True,
+        )
+
+        # Never compare scores from different validation protocols.
+        if checkpoint.get("validation_protocol") != validation_protocol:
+            print(
+                "Warning: Existing best checkpoint uses a different "
+                "validation protocol. It will not be used for comparison."
+            )
+            return -1.0
+
+        metrics = checkpoint.get("val_metrics", {})
+        dice = metrics.get("dice")
+
+        if (
+            isinstance(dice, (int, float))
+            and np.isfinite(dice)
+            and 0.0 <= dice <= 1.0
+        ):
+            return float(dice)
+
+    except (OSError, RuntimeError, ValueError, TypeError, EOFError) as exc:
+        print(
+            f"Warning: Could not read best checkpoint ({exc}). "
+            "It will not be used for comparison."
+        )
+        return -1.0
+
+    print(
+        "Warning: Existing best checkpoint has no valid Dice score. "
+        "It will not be used for comparison."
+    )
+    return -1.0
 
 
 def make_loader(
@@ -108,8 +154,12 @@ def evaluate(model, loader, device):
                 prediction = prediction.astype(np.uint8)
                 truth = truth.astype(np.uint8)
 
-                dice_scores.append(dice_coefficient(prediction, truth))
-                iou_scores.append(iou_score(prediction, truth))
+                dice_scores.append(
+                    dice_coefficient(prediction, truth)
+                )
+                iou_scores.append(
+                    iou_score(prediction, truth)
+                )
 
     if sample_count == 0:
         raise ValueError("Cannot evaluate an empty DataLoader")
@@ -126,11 +176,42 @@ def main():
         description="Train a U-Net for CAMUS 4CH LV segmentation."
     )
 
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--max-train-batches", type=int, default=2)
-    parser.add_argument("--max-val-batches", type=int, default=2)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=1,
+        help="Number of training epochs (default: 1).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=2,
+        help="Number of frames per batch (default: 2).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42).",
+    )
+    parser.add_argument(
+        "--max-train-batches",
+        type=int,
+        default=2,
+        help=(
+            "Maximum training batches per epoch; use 0 for the full "
+            "training split (default: 2, smoke test)."
+        ),
+    )
+    parser.add_argument(
+        "--max-val-batches",
+        type=int,
+        default=2,
+        help=(
+            "Maximum validation batches; use 0 for the full validation "
+            "split (default: 2, smoke test)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -155,28 +236,52 @@ def main():
     )
 
     model = UNet().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=1e-3,
+    )
     criterion = nn.BCEWithLogitsLoss()
 
-    checkpoint_path = os.path.join(
-        "outputs",
-        "checkpoints",
+    checkpoint_dir = os.path.join("outputs", "checkpoints")
+
+    latest_checkpoint_path = os.path.join(
+        checkpoint_dir,
         "unet_4ch_latest.pth",
     )
 
+    if args.max_val_batches == 0:
+        validation_protocol = "full_validation"
+    else:
+        validation_protocol = (
+            f"limited_validation_{args.max_val_batches}_batches"
+        )
+
+    best_checkpoint_path = os.path.join(
+        checkpoint_dir,
+        f"unet_4ch_best_{validation_protocol}.pth",
+    )
+
+    best_dice = load_best_dice(
+        best_checkpoint_path,
+        validation_protocol,
+    )
+
     parameter_count = sum(
-        parameter.numel() for parameter in model.parameters()
+        parameter.numel()
+        for parameter in model.parameters()
     )
 
     print(f"Device: {device}")
     print(f"Seed: {args.seed}")
     print(f"Batch size: {args.batch_size}")
-    print(f"Learning rate: {1e-3}")
+    print("Learning rate: 0.001")
     print(f"Train samples: {len(train_loader.dataset)}")
     print(f"Validation samples: {len(val_loader.dataset)}")
     print(f"Model parameters: {parameter_count}")
     print(f"Max train batches: {args.max_train_batches}")
     print(f"Max validation batches: {args.max_val_batches}")
+    print(f"Validation protocol: {validation_protocol}")
+    print(f"Best validation Dice for this protocol: {best_dice:.4f}")
 
     for epoch in range(args.epochs):
         model.train()
@@ -193,8 +298,10 @@ def main():
             masks = batch["mask"].unsqueeze(1).float().to(device)
 
             optimizer.zero_grad()
+
             logits = model(images)
             loss = criterion(logits, masks)
+
             loss.backward()
             optimizer.step()
 
@@ -212,6 +319,7 @@ def main():
             for index, batch in enumerate(val_loader):
                 if index >= args.max_val_batches:
                     break
+
                 validation_batches.append(batch)
 
             val_metrics = evaluate(
@@ -220,7 +328,11 @@ def main():
                 device,
             )
         else:
-            val_metrics = evaluate(model, val_loader, device)
+            val_metrics = evaluate(
+                model,
+                val_loader,
+                device,
+            )
 
         print(
             f"Epoch {epoch + 1}/{args.epochs} | "
@@ -230,14 +342,36 @@ def main():
             f"val_iou={val_metrics['iou']:.4f}"
         )
 
+        # Save the most recently completed epoch.
         save_checkpoint(
-            checkpoint_path,
+            latest_checkpoint_path,
             model,
             optimizer,
             epoch + 1,
             val_metrics,
             args.seed,
+            validation_protocol,
         )
+
+        # Preserve the best result for this validation protocol.
+        current_dice = val_metrics["dice"]
+
+        if current_dice > best_dice:
+            save_checkpoint(
+                best_checkpoint_path,
+                model,
+                optimizer,
+                epoch + 1,
+                val_metrics,
+                args.seed,
+                validation_protocol,
+            )
+            best_dice = current_dice
+            print(f"New best validation Dice: {best_dice:.4f}")
+        else:
+            print(
+                f"Best validation Dice remains: {best_dice:.4f}"
+            )
 
 
 if __name__ == "__main__":
